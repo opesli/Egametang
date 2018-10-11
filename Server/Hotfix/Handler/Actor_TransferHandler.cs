@@ -1,8 +1,9 @@
 ﻿using System;
+using System.Net;
 using System.Threading.Tasks;
-using Model;
+using ETModel;
 
-namespace Hotfix
+namespace ETHotfix
 {
 	[ActorMessageHandler(AppType.Map)]
 	public class Actor_TransferHandler : AMActorRpcHandler<Unit, Actor_TransferRequest, Actor_TransferResponse>
@@ -15,16 +16,17 @@ namespace Hotfix
 			{
 				long unitId = unit.Id;
 
-
 				// 先在location锁住unit的地址
-				await Game.Scene.GetComponent<LocationProxyComponent>().Lock(unitId);
+				await Game.Scene.GetComponent<LocationProxyComponent>().Lock(unitId, unit.InstanceId);
 
-				// 删除unit actorcomponent,让其它进程发送过来的消息找不到actor，重发
-				unit.RemoveComponent<ActorComponent>();
+				// 删除unit,让其它进程发送过来的消息找不到actor，重发
+				Game.EventSystem.Remove(unitId);
+				
+				long instanceId = unit.InstanceId;
 				
 				int mapIndex = message.MapIndex;
 
-				StartConfigComponent startConfigComponent = Game.Scene.GetComponent<StartConfigComponent>();
+				StartConfigComponent startConfigComponent = StartConfigComponent.Instance;
 
 				// 考虑AllServer情况
 				if (startConfigComponent.Count == 1)
@@ -34,16 +36,16 @@ namespace Hotfix
 
 				// 传送到map
 				StartConfig mapConfig = startConfigComponent.MapConfigs[mapIndex];
-				string address = mapConfig.GetComponent<InnerConfig>().Address;
+				IPEndPoint address = mapConfig.GetComponent<InnerConfig>().IPEndPoint;
 				Session session = Game.Scene.GetComponent<NetInnerComponent>().Get(address);
 
 				// 只删除不disponse否则M2M_TrasferUnitRequest无法序列化Unit
 				Game.Scene.GetComponent<UnitComponent>().RemoveNoDispose(unitId);
-				await session.Call<M2M_TrasferUnitResponse>(new M2M_TrasferUnitRequest() { Unit = unit });
+				M2M_TrasferUnitResponse m2m_TrasferUnitResponse = (M2M_TrasferUnitResponse)await session.Call(new M2M_TrasferUnitRequest() { Unit = unit });
 				unit.Dispose();
 
-				// 解锁unit的地址,并且更新unit的地址
-				await Game.Scene.GetComponent<LocationProxyComponent>().UnLock(unitId, mapConfig.AppId);
+				// 解锁unit的地址,并且更新unit的instanceId
+				await Game.Scene.GetComponent<LocationProxyComponent>().UnLock(unitId, instanceId, m2m_TrasferUnitResponse.InstanceId);
 
 				reply(response);
 			}

@@ -27,7 +27,11 @@ namespace ILRuntime.Runtime.CLRBinding
         {
             if (i.IsPrivate)
                 return true;
-            if (i.IsGenericMethod)
+            if (i.IsGenericMethodDefinition)
+                return true;
+            if (i.IsConstructor && type.IsAbstract)
+                return true;
+            if (i is MethodInfo && ((MethodInfo)i).ReturnType.IsByRef)
                 return true;
             //EventHandler is currently not supported
             var param = i.GetParameters();
@@ -39,9 +43,10 @@ namespace ILRuntime.Runtime.CLRBinding
                 if (t[0] == "get" || t[0] == "set")
                 {
                     Type[] ts;
-                    if (t[1] == "Item")
+                    var cnt = t[0] == "set" ? param.Length - 1 : param.Length;
+
+                    if (cnt > 0)
                     {
-                        var cnt = t[0] == "set" ? param.Length - 1 : param.Length;
                         ts = new Type[cnt];
                         for (int j = 0; j < cnt; j++)
                         {
@@ -69,20 +74,30 @@ namespace ILRuntime.Runtime.CLRBinding
             return false;
         }
 
-        internal static void AppendParameters(this ParameterInfo[] param, StringBuilder sb)
+        internal static void AppendParameters(this ParameterInfo[] param, StringBuilder sb, bool isMultiArr = false, int skipLast = 0)
         {
             bool first = true;
-            foreach (var j in param)
+            for (int i = 0; i < param.Length - skipLast; i++)
             {
                 if (first)
                     first = false;
                 else
                     sb.Append(", ");
+                var j = param[i];
                 if (j.IsOut && j.ParameterType.IsByRef)
                     sb.Append("out ");
                 else if (j.ParameterType.IsByRef)
                     sb.Append("ref ");
-                sb.Append(j.Name);
+                if (isMultiArr)
+                {
+                    sb.Append("a");
+                    sb.Append(i + 1);
+                }
+                else
+                {
+                    sb.Append("@");
+                    sb.Append(j.Name);
+                }
             }
         }
 
@@ -156,73 +171,73 @@ namespace ILRuntime.Runtime.CLRBinding
                 if (type == typeof(int))
                 {
                     sb.AppendLine("                        ___dst->ObjectType = ObjectTypes.Integer;");
-                    sb.Append("                        ___dst->Value = " + paramName);
+                    sb.Append("                        ___dst->Value = @" + paramName);
                     sb.AppendLine(";");
                 }
                 else if (type == typeof(long))
                 {
                     sb.AppendLine("                        ___dst->ObjectType = ObjectTypes.Long;");
-                    sb.Append("                        *(long*)&___dst->Value = " + paramName);
+                    sb.Append("                        *(long*)&___dst->Value = @" + paramName);
                     sb.AppendLine(";");
                 }
                 else if (type == typeof(short))
                 {
                     sb.AppendLine("                        ___dst->ObjectType = ObjectTypes.Integer;");
-                    sb.Append("                        ___dst->Value = " + paramName);
+                    sb.Append("                        ___dst->Value = @" + paramName);
                     sb.AppendLine(";");
                 }
                 else if (type == typeof(bool))
                 {
                     sb.AppendLine("                        ___dst->ObjectType = ObjectTypes.Integer;");
-                    sb.Append("                        ___dst->Value = " + paramName + " ? 1 : 0;");
+                    sb.Append("                        ___dst->Value = @" + paramName + " ? 1 : 0;");
                     sb.AppendLine(";");
                 }
                 else if (type == typeof(ushort))
                 {
                     sb.AppendLine("                        ___dst->ObjectType = ObjectTypes.Integer;");
-                    sb.Append("                        ___dst->Value = " + paramName);
+                    sb.Append("                        ___dst->Value = @" + paramName);
                     sb.AppendLine(";");
                 }
                 else if (type == typeof(float))
                 {
                     sb.AppendLine("                        ___dst->ObjectType = ObjectTypes.Float;");
-                    sb.Append("                        *(float*)&___dst->Value = " + paramName);
+                    sb.Append("                        *(float*)&___dst->Value = @" + paramName);
                     sb.AppendLine(";");
                 }
                 else if (type == typeof(double))
                 {
                     sb.AppendLine("                        ___dst->ObjectType = ObjectTypes.Double;");
-                    sb.Append("                        *(double*)&___dst->Value = " + paramName);
+                    sb.Append("                        *(double*)&___dst->Value = @" + paramName);
                     sb.AppendLine(";");
                 }
                 else if (type == typeof(byte))
                 {
                     sb.AppendLine("                        ___dst->ObjectType = ObjectTypes.Integer;");
-                    sb.Append("                        ___dst->Value = " + paramName);
+                    sb.Append("                        ___dst->Value = @" + paramName);
                     sb.AppendLine(";");
                 }
                 else if (type == typeof(sbyte))
                 {
                     sb.AppendLine("                        ___dst->ObjectType = ObjectTypes.Integer;");
-                    sb.Append("                        ___dst->Value = " + paramName);
+                    sb.Append("                        ___dst->Value = @" + paramName);
                     sb.AppendLine(";");
                 }
                 else if (type == typeof(uint))
                 {
                     sb.AppendLine("                        ___dst->ObjectType = ObjectTypes.Integer;");
-                    sb.Append("                        ___dst->Value = (int)" + paramName);
+                    sb.Append("                        ___dst->Value = (int)@" + paramName);
                     sb.AppendLine(";");
                 }
                 else if (type == typeof(char))
                 {
                     sb.AppendLine("                        ___dst->ObjectType = ObjectTypes.Integer;");
-                    sb.Append("                        ___dst->Value = (int)" + paramName);
+                    sb.Append("                        ___dst->Value = (int)@" + paramName);
                     sb.AppendLine(";");
                 }
                 else if (type == typeof(ulong))
                 {
                     sb.AppendLine("                        ___dst->ObjectType = ObjectTypes.Long;");
-                    sb.Append("                        *(ulong*)&___dst->Value = " + paramName);
+                    sb.Append("                        *(ulong*)&___dst->Value = @" + paramName);
                     sb.AppendLine(";");
                 }
                 else
@@ -230,7 +245,20 @@ namespace ILRuntime.Runtime.CLRBinding
             }
             else
             {
-                if (!type.IsValueType)
+                sb.Append(@"                        object ___obj = @");
+                sb.Append(paramName);
+                sb.AppendLine(";");
+                sb.AppendLine(@"                        if (___dst->ObjectType >= ObjectTypes.Object)
+                        {
+                            if (___obj is CrossBindingAdaptorType)
+                                ___obj = ((CrossBindingAdaptorType)___obj).ILInstance;
+                            __mStack[___dst->Value] = ___obj;
+                        }
+                        else
+                        {
+                            ILIntepreter.UnboxObject(___dst, ___obj, __mStack, __domain);
+                        }");
+                /*if (!type.IsValueType)
                 {
                     sb.Append(@"                        object ___obj = ");
                     sb.Append(paramName);
@@ -245,7 +273,7 @@ namespace ILRuntime.Runtime.CLRBinding
                     sb.Append("                        __mStack[___dst->Value] = ");
                     sb.Append(paramName);
                     sb.AppendLine(";");
-                }
+                }*/
             }
         }
 
@@ -320,16 +348,34 @@ namespace ILRuntime.Runtime.CLRBinding
             }
             else
             {
+                string isBox;
+                if (type == typeof(object))
+                    isBox = ", true";
+                else
+                    isBox = "";
                 if (!type.IsSealed && type != typeof(ILRuntime.Runtime.Intepreter.ILTypeInstance))
                 {
-                    sb.AppendLine(@"            object obj_result_of_this_method = result_of_this_method;
+                    sb.Append(@"            object obj_result_of_this_method = result_of_this_method;
             if(obj_result_of_this_method is CrossBindingAdaptorType)
             {    
-                return ILIntepreter.PushObject(__ret, __mStack, ((CrossBindingAdaptorType)obj_result_of_this_method).ILInstance);
+                return ILIntepreter.PushObject(__ret, __mStack, ((CrossBindingAdaptorType)obj_result_of_this_method).ILInstance");
+                    sb.Append(isBox);
+                    sb.AppendLine(@");
             }");
                 }
-                sb.AppendLine("            return ILIntepreter.PushObject(__ret, __mStack, result_of_this_method);");
+                sb.AppendLine(string.Format("            return ILIntepreter.PushObject(__ret, __mStack, result_of_this_method{0});", isBox));
             }
+        }
+
+        internal static bool HasByRefParam(this ParameterInfo[] param)
+        {
+            for (int j = param.Length; j > 0; j--)
+            {
+                var p = param[j - 1];
+                if (p.ParameterType.IsByRef)
+                    return true;
+            }
+            return false;
         }
     }
 }
